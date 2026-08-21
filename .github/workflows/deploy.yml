@@ -20,16 +20,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
         with:
-          bun-version: latest
+          node-version: 20
 
-      - name: Install dependencies
-        run: bun install
-
-      - name: Build
-        run: bun run build
+      - name: Install dependencies & Build
+        run: |
+          npm install --package-lock-only || true
+          npm install
+          npm run build
         env:
           VITE_GEMINI_API_KEY: ${{ secrets.VITE_GEMINI_API_KEY }}
 
