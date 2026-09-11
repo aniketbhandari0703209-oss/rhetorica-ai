@@ -1,135 +1,106 @@
-/// <reference types="vite/client" />
-
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+  createRootRoute,
   Outlet,
-  Link,
-  createRootRouteWithContext,
-  useRouter,
-  HeadContent,
-  Scripts,
-} from "@tanstack/react-router";
-import { useEffect, type ReactNode } from "react";
+} from '@tanstack/react-router';
+import type { ReactNode } from 'react';
 
-import "../styles.css";
-import { reportLovableError } from "../lib/lovable-error-reporting";
+import '../styles.css';
 
-function NotFoundComponent() {
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className="max-w-md text-center">
-        <h1 className="text-7xl font-bold text-foreground">404</h1>
-        <h2 className="mt-4 text-xl font-semibold text-foreground">Page not found</h2>
-        <p className="mt-2 text-sm text-muted-foreground">
-          The page you're looking for doesn't exist or has been moved.
-        </p>
-        <div className="mt-6">
-          <Link
-            to="/"
-            className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-          >
-            Go home
-          </Link>
-        </div>
-      </div>
-    </div>
-  );
-}
+function ErrorComponent({
+  error,
+  reset,
+}: {
+  error: unknown;
+  reset: () => void;
+}) {
+  const message =
+    error instanceof Error
+      ? error.message
+      : 'Something went wrong. Please try again.';
 
-function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
-  console.error(error);
-  const router = useRouter();
-  useEffect(() => {
-    reportLovableError(error, { boundary: "tanstack_root_error_component" });
-  }, [error]);
-
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className="max-w-md text-center">
-        <h1 className="text-xl font-semibold tracking-tight text-foreground">
-          This page didn't load
-        </h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Something went wrong on our end. You can try refreshing or head back home.
-        </p>
-        <div className="mt-6 flex flex-wrap justify-center gap-2">
-          <button
-            onClick={() => {
-              router.invalidate();
-              reset();
-            }}
-            className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-          >
-            Try again
-          </button>
-          <a
-            href="/"
-            className="inline-flex items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
-          >
-            Go home
-          </a>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
-  head: () => ({
-    meta: [
-      { charSet: "utf-8" },
-      { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Rhetorica — Quantitative Speech Analytics" },
-      {
-        name: "description",
-        content: "Analyze the emotional arc of your speeches paragraph-by-paragraph.",
-      },
-      { property: "og:title", content: "Rhetorica — Quantitative Speech Analytics" },
-      {
-        property: "og:description",
-        content: "Analyze the emotional arc of your speeches paragraph-by-paragraph.",
-      },
-      { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary_large_image" },
-    ],
-    links: [
-      { rel: "preconnect", href: "https://fonts.googleapis.com" },
-      { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
-      {
-        rel: "stylesheet",
-        href: "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap",
-      },
-      { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
-    ],
-  }),
-
-  shellComponent: RootShell,
-  component: RootComponent,
-  notFoundComponent: NotFoundComponent,
-  errorComponent: ErrorComponent,
-});
-
-function RootShell({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <head>
-        <HeadContent />
+        <meta charSet="utf-8" />
+        <meta
+          name="viewport"
+          content="width=device-width, initial-scale=1"
+        />
+        <title>Rhetorica AI</title>
       </head>
+
       <body>
-        {children}
-        <Scripts />
+        <div className="min-h-screen bg-[#020617] text-[#eaf2ff]">
+          <div className="flex min-h-screen items-center justify-center px-6">
+            <div className="w-full max-w-lg rounded-2xl border border-[#173552] bg-[#071225] p-8 shadow-2xl">
+              <div className="mb-6">
+                <div className="mb-3 text-xs font-extrabold uppercase tracking-[0.2em] text-cyan-400">
+                  Rhetorica AI
+                </div>
+
+                <h1 className="text-3xl font-bold tracking-tight text-white">
+                  Something went wrong
+                </h1>
+
+                <p className="mt-3 text-sm leading-6 text-[#9db0c8]">
+                  The speech intelligence workspace encountered an
+                  unexpected error.
+                </p>
+              </div>
+
+              <div className="mb-6 rounded-xl border border-[#173552] bg-[#030c17] p-4">
+                <p className="break-words text-xs leading-5 text-[#8fa5bf]">
+                  {message}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={reset}
+                className="rounded-lg bg-[#2563eb] px-5 py-3 text-xs font-extrabold uppercase tracking-[0.12em] text-white transition hover:bg-[#3b82f6]"
+              >
+                Try Again
+              </button>
+            </div>
+          </div>
+        </div>
       </body>
     </html>
   );
 }
 
 function RootComponent() {
-  const { queryClient } = Route.useRouteContext();
-
   return (
-    <QueryClientProvider client={queryClient}>
-      {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-      <Outlet />
-    </QueryClientProvider>
+    <html lang="en">
+      <head>
+        <meta charSet="utf-8" />
+
+        <meta
+          name="viewport"
+          content="width=device-width, initial-scale=1"
+        />
+
+        <meta
+          name="theme-color"
+          content="#020617"
+        />
+
+        <meta
+          name="description"
+          content="Rhetorica AI — an intelligent speech direction and analysis platform."
+        />
+
+        <title>Rhetorica AI</title>
+      </head>
+
+      <body>
+        <Outlet />
+      </body>
+    </html>
   );
 }
+
+export const Route = createRootRoute({
+  component: RootComponent,
+  errorComponent: ErrorComponent,
+});
