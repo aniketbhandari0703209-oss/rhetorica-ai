@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createFileRoute } from '@tanstack/react-router';
 import { generateGemini } from '../lib/gemini.functions';
+import { supabase } from '../lib/supabase';
+import AuthScreen from '../components/AuthScreen';
 import {
   Area,
   AreaChart,
@@ -42,6 +44,7 @@ import {
   Gauge,
   Clock3,
   Eye,
+  LogOut,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Canvas, useFrame } from '@react-three/fiber';
@@ -1365,34 +1368,16 @@ function Index() {
   >('landing');
 
   const [speeches, setSpeeches] =
-    useState<SavedSpeech[]>([
-      {
-        id: '1',
-        title:
-          'MUN Opening Statement - China',
-        agenda:
-          'Deliver an authoritative, diplomatic, and fact-backed MUN opening statement.',
-        transcript:
-          'Honourable Chair, distinguished delegates,\n\nGender equality is not merely an aspiration; it is a responsibility.\n\nThe delegation of China believes that gender justice cannot remain a principle written on paper.',
-        date:
-          'August 19, 2026',
-        tag: 'PROJECT',
-        data: null,
-      },
-      {
-        id: '2',
-        title:
-          'Climate Change Rebuttal',
-        agenda:
-          'Counter arguments with data-driven reasoning and emotional appeal.',
-        transcript:
-          'Climate change is no longer a distant possibility.\n\nIt is a present reality that demands coordinated action.',
-        date:
-          'August 12, 2026',
-        tag: 'DEBATE',
-        data: null,
-      },
-    ]);
+    useState<SavedSpeech[]>([]);
+
+  const [authReady, setAuthReady] =
+    useState(false);
+
+  const [currentUserId, setCurrentUserId] =
+    useState<string | null>(null);
+
+  const [username, setUsername] =
+    useState('');
 
   const [
     activeSpeechId,
@@ -1642,10 +1627,7 @@ function Index() {
 
   const detectPitch = (buffer: Float32Array, sampleRate: number) => {
     let rms = 0;
-    for (let i = 0; i < buffer.length; i += 1) {
-  const sample = buffer[i] ?? 0;
-  rms += sample * sample;
-}
+    for (let i = 0; i < buffer.length; i += 1) rms += (buffer[i] ?? 0) * (buffer[i] ?? 0);
     rms = Math.sqrt(rms / buffer.length);
     if (rms < 0.018) return 0;
     let bestOffset = -1;
@@ -1654,11 +1636,7 @@ function Index() {
     const maxOffset = Math.floor(sampleRate / 70);
     for (let offset = minOffset; offset <= Math.min(maxOffset, buffer.length - 2); offset += 1) {
       let correlation = 0;
-      for (let i = 0; i < buffer.length - offset; i += 1) {
-  const current = buffer[i] ?? 0;
-  const offsetSample = buffer[i + offset] ?? 0;
-  correlation += current * offsetSample;
-}
+      for (let i = 0; i < buffer.length - offset; i += 1) correlation += (buffer[i] ?? 0) * (buffer[i + offset] ?? 0);
       correlation /= buffer.length - offset;
       if (correlation > bestCorrelation) { bestCorrelation = correlation; bestOffset = offset; }
     }
@@ -1744,19 +1722,7 @@ function Index() {
       const timeData = new Float32Array(analyser.fftSize);
       const loop = () => {
         if (!analyserRef.current) return; analyserRef.current.getFloatTimeDomainData(timeData);
-       let sum = 0;
-let peak = 0;
-
-for (let i = 0; i < timeData.length; i += 1) {
-  const sample = timeData[i] ?? 0;
-  const v = Math.abs(sample);
-
-  sum += v * v;
-
-  if (v > peak) {
-    peak = v;
-  }
-}
+        let sum = 0; let peak = 0; for (let i = 0; i < timeData.length; i += 1) { const v = Math.abs(timeData[i] ?? 0); sum += v * v; if (v > peak) peak = v; }
         const rms = Math.sqrt(sum / timeData.length); const now = performance.now(); const livePaused = audioPausedStateRef.current && audioPausedAtRef.current ? now - audioPausedAtRef.current : 0; const elapsed = Math.max(0, (now - audioStartedAtRef.current - pausedDurationRef.current - livePaused) / 1000);
         const pitchHz = detectPitch(timeData, context.sampleRate);
         if (rms < 0.018) { if (silenceStartedAtRef.current === null) silenceStartedAtRef.current = now; }
@@ -1772,6 +1738,154 @@ for (let i = 0; i < timeData.length; i += 1) {
     } catch { setAudioError('Unable to access your microphone. Please allow microphone access and try again.'); setIsAudioActive(false); }
   };
 
+  useEffect(() => {
+    let mounted = true;
+
+    const loadUserData = async (
+      userId: string,
+    ) => {
+      const [
+        profileResult,
+        speechResult,
+      ] = await Promise.all([
+        supabase
+          .from('profiles')
+          .select('username')
+          .eq('id', userId)
+          .maybeSingle(),
+
+        supabase
+          .from('speeches')
+          .select(
+            'id,title,agenda,transcript,tag,analysis,created_at',
+          )
+          .order('created_at', {
+            ascending: false,
+          }),
+      ]);
+
+      if (!mounted) return;
+
+      if (profileResult.error) {
+        setError(
+          profileResult.error.message,
+        );
+      } else {
+        setUsername(
+          profileResult.data?.username ?? '',
+        );
+      }
+
+      if (speechResult.error) {
+        setError(
+          speechResult.error.message,
+        );
+        setSpeeches([]);
+      } else {
+        setSpeeches(
+          (speechResult.data ?? []).map(
+            (row) => ({
+              id: row.id,
+              title: row.title,
+              agenda: row.agenda ?? '',
+              transcript:
+                row.transcript ?? '',
+              date: new Date(
+                row.created_at,
+              ).toLocaleDateString(
+                'en-US',
+                {
+                  month: 'long',
+                  day: 'numeric',
+                  year: 'numeric',
+                },
+              ),
+              tag:
+                row.tag === 'DEBATE'
+                  ? 'DEBATE'
+                  : 'PROJECT',
+              data:
+                row.analysis as DashboardData | null,
+            }),
+          ),
+        );
+      }
+    };
+
+    const initializeAuth = async () => {
+      const {
+        data,
+        error: sessionError,
+      } = await supabase.auth.getSession();
+
+      if (!mounted) return;
+
+      if (sessionError) {
+        setError(
+          sessionError.message,
+        );
+        setAuthReady(true);
+        return;
+      }
+
+      const session = data.session;
+
+      if (!session?.user) {
+        setCurrentUserId(null);
+        setUsername('');
+        setSpeeches([]);
+        setAuthReady(true);
+        return;
+      }
+
+      setCurrentUserId(
+        session.user.id,
+      );
+
+      await loadUserData(
+        session.user.id,
+      );
+
+      if (mounted) {
+        setAuthReady(true);
+      }
+    };
+
+    void initializeAuth();
+
+    const {
+      data: authListener,
+    } =
+      supabase.auth.onAuthStateChange(
+        (_event, session) => {
+          if (!mounted) return;
+
+          if (!session?.user) {
+            setCurrentUserId(null);
+            setUsername('');
+            setSpeeches([]);
+            setActiveSpeechId(null);
+            setDashboardData(null);
+            setCurrentView('landing');
+            return;
+          }
+
+          setCurrentUserId(
+            session.user.id,
+          );
+
+          void loadUserData(
+            session.user.id,
+          );
+        },
+      );
+
+    return () => {
+      mounted = false;
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
+
   useEffect(() => () => { stopWebcam(); stopAudioCoach(); }, []);
 
   /* ======================================================================== */
@@ -1780,17 +1894,11 @@ for (let i = 0; i < timeData.length; i += 1) {
 
   const openNewSpeech =
     () => {
-      setTitleText(
-        'New Speech Presentation',
-      );
+      setTitleText('');
 
-      setAgendaText(
-        'Persuade the audience with clarity, poise, and strong evidence.',
-      );
+      setAgendaText('');
 
-      setSpeechText(
-        'Enter your speech transcript here...',
-      );
+      setSpeechText('');
 
       setDashboardData(
         null,
@@ -2270,9 +2378,39 @@ Group contiguous sentences into meaningful delivery sections rather than generat
               data,
             };
 
-          if (
-            activeSpeechId
-          ) {
+          if (!currentUserId) {
+            throw new Error(
+              'Your session has expired. Please sign in again.',
+            );
+          }
+
+          if (activeSpeechId) {
+            const { error: updateError } =
+              await supabase
+                .from('speeches')
+                .update({
+                  title: newSpeech.title,
+                  agenda: newSpeech.agenda,
+                  transcript:
+                    newSpeech.transcript,
+                  tag: newSpeech.tag,
+                  analysis: newSpeech.data,
+                  updated_at:
+                    new Date().toISOString(),
+                })
+                .eq(
+                  'id',
+                  activeSpeechId,
+                )
+                .eq(
+                  'user_id',
+                  currentUserId,
+                );
+
+            if (updateError) {
+              throw updateError;
+            }
+
             setSpeeches(
               (
                 previous,
@@ -2288,17 +2426,57 @@ Group contiguous sentences into meaningful delivery sections rather than generat
                 ),
             );
           } else {
+            const {
+              data: insertedSpeech,
+              error: insertError,
+            } = await supabase
+              .from('speeches')
+              .insert({
+                user_id:
+                  currentUserId,
+                title: newSpeech.title,
+                agenda: newSpeech.agenda,
+                transcript:
+                  newSpeech.transcript,
+                tag: newSpeech.tag,
+                analysis: newSpeech.data,
+              })
+              .select(
+                'id,title,agenda,transcript,tag,analysis,created_at',
+              )
+              .single();
+
+            if (insertError) {
+              throw insertError;
+            }
+
+            const savedSpeech: SavedSpeech =
+              {
+                ...newSpeech,
+                id: insertedSpeech.id,
+                date: new Date(
+                  insertedSpeech.created_at,
+                ).toLocaleDateString(
+                  'en-US',
+                  {
+                    month: 'long',
+                    day: 'numeric',
+                    year: 'numeric',
+                  },
+                ),
+              };
+
             setSpeeches(
               (
                 previous,
               ) => [
-                newSpeech,
+                savedSpeech,
                 ...previous,
               ],
             );
 
             setActiveSpeechId(
-              newSpeech.id,
+              savedSpeech.id,
             );
           }
 
@@ -2493,6 +2671,20 @@ Grade diplomacy, firmness and effectiveness, followed by a score out of 10.`,
   /* RENDER                                                                   */
   /* ======================================================================== */
 
+  if (!authReady) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#020812] text-blue-300">
+        <Loader2 className="h-5 w-5 animate-spin" />
+      </div>
+    );
+  }
+
+  if (!currentUserId) {
+    return (
+      <AuthScreen theme={theme} />
+    );
+  }
+
   return (
     <div
       className={`min-h-screen overflow-x-hidden transition-colors duration-500 ${
@@ -2602,6 +2794,36 @@ Grade diplomacy, firmness and effectiveness, followed by a score out of 10.`,
               >
                 AI DIRECTOR
               </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div
+                className={`hidden max-w-[150px] truncate text-xs font-bold sm:block ${
+                  dark
+                    ? 'text-[#bcd0e7]'
+                    : 'text-[#355274]'
+                }`}
+                title={username}
+              >
+                {username ||
+                  'Account'}
+              </div>
+
+              <button
+                type="button"
+                onClick={async () => {
+                  await supabase.auth.signOut();
+                }}
+                className={`flex h-12 w-12 items-center justify-center rounded-[9px] border transition-all hover:border-blue-500 ${border} ${
+                  dark
+                    ? 'bg-[#071321]'
+                    : 'bg-white'
+                }`}
+                title="Sign out"
+                aria-label="Sign out"
+              >
+                <LogOut className="h-[18px] w-[18px] text-blue-500" />
+              </button>
             </div>
 
             {currentView ===
