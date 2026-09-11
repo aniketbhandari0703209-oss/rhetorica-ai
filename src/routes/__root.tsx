@@ -1,8 +1,9 @@
 import {
   createRootRoute,
+  HeadContent,
   Outlet,
+  Scripts,
 } from '@tanstack/react-router';
-import type { ReactNode } from 'react';
 
 import '../styles.css';
 
@@ -21,11 +22,27 @@ function ErrorComponent({
   return (
     <html lang="en">
       <head>
-        <meta charSet="utf-8" />
+        <HeadContent />
+
+        <meta
+          charSet="utf-8"
+        />
+
         <meta
           name="viewport"
           content="width=device-width, initial-scale=1"
         />
+
+        <meta
+          name="theme-color"
+          content="#020617"
+        />
+
+        <meta
+          name="description"
+          content="Rhetorica AI — an intelligent speech direction and analysis platform."
+        />
+
         <title>Rhetorica AI</title>
       </head>
 
@@ -64,6 +81,8 @@ function ErrorComponent({
             </div>
           </div>
         </div>
+
+        <Scripts />
       </body>
     </html>
   );
@@ -73,7 +92,11 @@ function RootComponent() {
   return (
     <html lang="en">
       <head>
-        <meta charSet="utf-8" />
+        <HeadContent />
+
+        <meta
+          charSet="utf-8"
+        />
 
         <meta
           name="viewport"
@@ -95,6 +118,8 @@ function RootComponent() {
 
       <body>
         <Outlet />
+
+        <Scripts />
       </body>
     </html>
   );
