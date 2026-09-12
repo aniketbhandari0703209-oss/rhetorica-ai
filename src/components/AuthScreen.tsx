@@ -101,33 +101,21 @@ export default function AuthScreen({
           await supabase.auth.signUp({
             email: cleanEmail,
             password,
-            options: {
-              emailRedirectTo:
-                'https://rhetorica-ai.vercel.app',
-              data: {
-                username:
-                  cleanUsername,
-              },
-            },
+          options: {
+  data: {
+    username:
+      cleanUsername,
+  },
+},
           });
 
         if (signUpError) {
           throw signUpError;
         }
 
-        if (!data.session) {
-          setMessage(
-            'Account created. Check your email to confirm your account, then sign in.',
-          );
-
-          setMode('signin');
-          setPassword('');
-          setConfirmPassword('');
-        } else {
-          setMessage(
-            'Account created successfully.',
-          );
-        }
+       setMessage(
+  'Account created successfully. Welcome to Rhetorica.',
+);
       } else {
         const {
           error: signInError,
