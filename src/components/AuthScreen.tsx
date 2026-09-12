@@ -102,6 +102,8 @@ export default function AuthScreen({
             email: cleanEmail,
             password,
             options: {
+              emailRedirectTo:
+                'https://rhetorica-ai.vercel.app',
               data: {
                 username:
                   cleanUsername,
