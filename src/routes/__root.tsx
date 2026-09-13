@@ -124,8 +124,60 @@ function RootComponent() {
     </html>
   );
 }
+function NotFoundComponent() {
+  return (
+    <html lang="en">
+      <head>
+        <HeadContent />
 
+        <meta charSet="utf-8" />
+
+        <meta
+          name="viewport"
+          content="width=device-width, initial-scale=1"
+        />
+
+        <meta
+          name="theme-color"
+          content="#020617"
+        />
+
+        <title>Rhetorica AI</title>
+      </head>
+
+      <body>
+        <div className="min-h-screen bg-[#020617] text-[#eaf2ff]">
+          <div className="flex min-h-screen items-center justify-center px-6">
+            <div className="w-full max-w-lg rounded-2xl border border-[#173552] bg-[#071225] p-8 text-center shadow-2xl">
+              <div className="mb-3 text-xs font-extrabold uppercase tracking-[0.2em] text-cyan-400">
+                Rhetorica AI
+              </div>
+
+              <h1 className="text-5xl font-black tracking-tight text-white">
+                404
+              </h1>
+
+              <p className="mt-3 text-sm leading-6 text-[#9db0c8]">
+                The page you are looking for does not exist.
+              </p>
+
+              <a
+                href="/"
+                className="mt-6 inline-flex rounded-lg bg-[#2563eb] px-5 py-3 text-xs font-extrabold uppercase tracking-[0.12em] text-white transition hover:bg-[#3b82f6]"
+              >
+                Return Home
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <Scripts />
+      </body>
+    </html>
+  );
+}
 export const Route = createRootRoute({
   component: RootComponent,
   errorComponent: ErrorComponent,
+  notFoundComponent: NotFoundComponent,
 });

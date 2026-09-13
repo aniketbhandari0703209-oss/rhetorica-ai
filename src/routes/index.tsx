@@ -1,6 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createFileRoute } from '@tanstack/react-router';
 import { generateGemini } from '../lib/gemini.functions';
+import {
+  createPostureVision,
+  type PostureVisionAnalysis,
+  type PostureVisionEngine,
+} from '../lib/postureVision';
 import { supabase } from '../lib/supabase';
 import AuthScreen from '../components/AuthScreen';
 import {
@@ -121,9 +126,6 @@ declare global {
   interface Window {
     webkitSpeechRecognition?: SpeechRecognitionCtor;
     SpeechRecognition?: SpeechRecognitionCtor;
-    FaceDetector?: new (options?: { fastMode?: boolean; maxDetectedFaces?: number }) => {
-      detect(source: HTMLVideoElement): Promise<Array<{ boundingBox: DOMRectReadOnly }>>;
-    };
   }
 }
 
@@ -1462,7 +1464,7 @@ function Index() {
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const postureIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const postureDetectorRef = useRef<{ detect(source: HTMLVideoElement): Promise<Array<{ boundingBox: DOMRectReadOnly }>> } | null>(null);
+  const postureVisionRef = useRef<PostureVisionEngine | null>(null);
 
   const [isAudioActive, setIsAudioActive] = useState(false);
   const [isAudioPaused, setIsAudioPaused] = useState(false);
@@ -1516,108 +1518,254 @@ function Index() {
   /* CAMERA + POSTURE + EYE CONTACT                                           */
   /* ======================================================================== */
 
-  const analyzePostureFrame = async () => {
+  const analyzePostureFrame = () => {
     const video = videoRef.current;
-    const detector = postureDetectorRef.current;
-    if (!video || !detector || video.readyState < 2) return;
+    const vision = postureVisionRef.current;
+    if (!video || !vision || video.readyState < 2) return;
 
     try {
-      const faces = await detector.detect(video);
-      const face = faces[0];
-      if (!face) {
-        setPostureStatus('Face Not Detected');
-        setPostureMetrics((p) => ({ ...p, faceDetected: false, status: 'Face Not Detected', advice: 'Keep your face visible and remain inside the camera frame.' }));
-        return;
-      }
-
-      const box = face.boundingBox;
-      const frameWidth = video.videoWidth || 1;
-      const frameHeight = video.videoHeight || 1;
-      const centerX = (box.x + box.width / 2) / frameWidth;
-      const centerY = (box.y + box.height / 2) / frameHeight;
-      const centerOffset = Math.abs(centerX - 0.5);
-      const faceSize = box.width / frameWidth;
-      const verticalOffset = Math.abs(centerY - 0.47);
-
-      // A browser-native FaceDetector exposes face geometry, not eye landmarks.
-      // We therefore use a conservative proxy: centered face + stable framing = likely camera attention.
-      // This avoids pretending that gaze is exact when the browser cannot expose eye landmarks.
-      const centeringScore = Math.max(0, 100 - centerOffset * 300);
-      const verticalScore = Math.max(0, 100 - verticalOffset * 240);
-      const sizeScore = faceSize >= 0.15 && faceSize <= 0.48 ? 100 : faceSize < 0.15 ? 65 : 60;
-      const eyeContact = Math.round(centeringScore * 0.52 + verticalScore * 0.28 + sizeScore * 0.20);
-
-      let score = Math.round(eyeContact * 0.38 + centeringScore * 0.32 + verticalScore * 0.18 + sizeScore * 0.12);
-      let status = 'Optimal Upright';
-      let advice = 'Good framing. Keep your head level, shoulders relaxed and look toward the camera.';
-
-      if (centerOffset > 0.20) {
-        score -= 18;
-        status = centerX < 0.5 ? 'Center Yourself' : 'Center Yourself';
-        advice = centerX < 0.5 ? 'Move slightly right and bring your gaze back toward the camera.' : 'Move slightly left and bring your gaze back toward the camera.';
-      } else if (faceSize > 0.52) {
-        score -= 18;
-        status = 'Move Back';
-        advice = 'You are too close. Move back slightly while keeping your eyes toward the camera.';
-      } else if (faceSize < 0.12) {
-        score -= 18;
-        status = 'Move Closer';
-        advice = 'Move slightly closer so your face and eyes can be tracked more reliably.';
-      } else if (centerY > 0.64) {
-        score -= 18;
-        status = 'Raise Your Position';
-        advice = 'Raise your head or camera slightly and keep your gaze toward the lens.';
-      } else if (centerY < 0.27) {
-        score -= 15;
-        status = 'Lower Your Position';
-        advice = 'Lower your camera or settle slightly lower in frame.';
-      } else if (eyeContact < 62) {
-        score -= 12;
-        status = 'Look Toward Camera';
-        advice = 'Your face is visible, but the framing suggests your attention may be drifting. Look directly toward the camera lens.';
-      }
-
-      setPostureStatus(status);
-      setPostureMetrics({
-        score: Math.max(0, Math.min(100, score)), eyeContact: Math.max(0, Math.min(100, eyeContact)),
-        faceDetected: true, centerOffset: Math.round(centerOffset * 100), faceSize: Math.round(faceSize * 100), status, advice,
-      });
+      const analysis: PostureVisionAnalysis = vision.analyze(video);
+      setPostureStatus(analysis.status);
+      setPostureMetrics(analysis);
     } catch {
-      setPostureStatus('Analyzing');
+      setPostureStatus('Vision Tracking Error');
+      setPostureMetrics((previous) => ({
+        ...previous,
+        status: 'Vision Tracking Error',
+        advice: 'The camera vision model encountered an error. Restart the camera and try again.',
+      }));
     }
   };
 
   const stopWebcam = () => {
     if (postureIntervalRef.current) clearInterval(postureIntervalRef.current);
     postureIntervalRef.current = null;
+
     const video = videoRef.current;
     if (video?.srcObject) {
       (video.srcObject as MediaStream).getTracks().forEach((track) => track.stop());
       video.srcObject = null;
     }
-    postureDetectorRef.current = null;
+
+    postureVisionRef.current?.close();
+    postureVisionRef.current = null;
+
     setIsWebcamActive(false);
     setPostureStatus('Standby');
-    setPostureMetrics({ score: 0, eyeContact: 0, faceDetected: false, centerOffset: 0, faceSize: 0, status: 'Standby', advice: 'Start the coach to calibrate your camera position.' });
+    setPostureMetrics({
+      score: 0,
+      eyeContact: 0,
+      faceDetected: false,
+      centerOffset: 0,
+      faceSize: 0,
+      status: 'Standby',
+      advice: 'Start the coach to calibrate your camera position.',
+    });
   };
 
   const toggleWebcam = async () => {
-    if (isWebcamActive) { stopWebcam(); return; }
+    if (isWebcamActive) {
+      stopWebcam();
+      return;
+    }
+
+    let stream: MediaStream | null = null;
+    let cameraStarted = false;
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
-      if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play(); }
-      setIsWebcamActive(true);
-      setPostureStatus('Analyzing');
-      if (window.FaceDetector) {
-        postureDetectorRef.current = new window.FaceDetector({ fastMode: true, maxDetectedFaces: 1 });
-        await analyzePostureFrame();
-      } else {
-        setPostureStatus('Camera Ready');
-        setPostureMetrics({ score: 70, eyeContact: 65, faceDetected: true, centerOffset: 0, faceSize: 0, status: 'Camera Ready', advice: 'Live face landmarks are unavailable in this browser. Keep your face centered and maintain direct eye contact with the camera.' });
+      stream =
+        await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: 'user',
+            width: {
+              ideal: 1280,
+            },
+            height: {
+              ideal: 720,
+            },
+          },
+          audio: false,
+        });
+
+      const video =
+        videoRef.current;
+
+      if (!video) {
+        throw new Error(
+          'Camera preview element is unavailable.',
+        );
       }
-      postureIntervalRef.current = setInterval(() => { void analyzePostureFrame(); }, 700);
-    } catch {
-      setError('Unable to access camera. Please check browser permissions.');
+
+      video.srcObject = stream;
+      cameraStarted = true;
+
+      /*
+       * Mark the camera active immediately after the stream is attached.
+       * Vision initialization must never control whether the camera stays on.
+       */
+      setIsWebcamActive(true);
+      setError(null);
+      setPostureStatus('Loading Vision');
+      setPostureMetrics({
+        score: 0,
+        eyeContact: 0,
+        faceDetected: false,
+        centerOffset: 0,
+        faceSize: 0,
+        status: 'Loading Vision',
+        advice:
+          'Loading face and posture tracking.',
+      });
+
+      /*
+       * Wait for the video element to receive metadata before attempting
+       * playback. Some browsers expose the MediaStream before the video
+       * element is actually ready to render it.
+       */
+      if (video.readyState < 1) {
+        await new Promise<void>((resolve) => {
+          const handleMetadata = () => {
+            video.removeEventListener(
+              'loadedmetadata',
+              handleMetadata,
+            );
+            resolve();
+          };
+
+          video.addEventListener(
+            'loadedmetadata',
+            handleMetadata,
+            { once: true },
+          );
+        });
+      }
+
+      /*
+       * Playback failure should not automatically kill a working camera
+       * stream. The browser may temporarily reject play() while the preview
+       * is becoming ready.
+       */
+      try {
+        await video.play();
+      } catch (playError) {
+        console.warn(
+          'Camera preview playback was delayed:',
+          playError,
+        );
+      }
+
+      const vision =
+        createPostureVision();
+
+      postureVisionRef.current =
+        vision;
+
+      try {
+        await vision.initialize();
+
+        /*
+         * Calibration is deliberately separate from camera activation.
+         * If the ML models fail, the camera remains active and the UI reports
+         * the actual vision failure instead of pretending to have metrics.
+         */
+        setPostureStatus(
+          'Calibrating',
+        );
+
+        setPostureMetrics(
+          (previous) => ({
+            ...previous,
+            status: 'Calibrating',
+            advice:
+              'Sit naturally in your normal speaking position and look toward the camera for a moment.',
+          }),
+        );
+
+        await vision.calibrate(
+          video,
+          1600,
+        );
+
+        setPostureStatus(
+          'Analyzing',
+        );
+
+        setPostureMetrics(
+          (previous) => ({
+            ...previous,
+            status: 'Analyzing',
+            advice:
+              'Vision tracking is active. Continue speaking naturally.',
+          }),
+        );
+
+        analyzePostureFrame();
+
+        postureIntervalRef.current =
+          setInterval(() => {
+            analyzePostureFrame();
+          }, 250);
+      } catch (visionError) {
+        console.error(
+          'Posture vision initialization failed:',
+          visionError,
+        );
+
+        setPostureStatus(
+          'Vision Tracking Error',
+        );
+
+        setPostureMetrics(
+          (previous) => ({
+            ...previous,
+            status:
+              'Vision Tracking Error',
+            advice:
+              'The camera is working, but the vision model could not initialize. Your camera will remain active.',
+          }),
+        );
+      }
+    } catch (cameraError) {
+      console.error(
+        'Camera initialization failed:',
+        cameraError,
+      );
+
+      /*
+       * Only stop the stream if the camera itself failed.
+       * Never run this branch for MediaPipe/model/calibration failures.
+       */
+      if (
+        stream &&
+        !cameraStarted
+      ) {
+        stream
+          .getTracks()
+          .forEach((track) =>
+            track.stop(),
+          );
+      }
+
+      setIsWebcamActive(false);
+
+      setPostureStatus(
+        'Camera Error',
+      );
+
+      setPostureMetrics({
+        score: 0,
+        eyeContact: 0,
+        faceDetected: false,
+        centerOffset: 0,
+        faceSize: 0,
+        status: 'Camera Error',
+        advice:
+          'Unable to access the camera. Check browser permissions and try again.',
+      });
+
+      setError(
+        'Unable to access camera. Please check browser permissions.',
+      );
     }
   };
 
